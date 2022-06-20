@@ -1,0 +1,870 @@
+require(shiny)
+require(shinydashboard)
+library(shinyWidgets)
+library(shinythemes)
+library(ggplot2)
+library(AgroReg)
+library(drc)
+library(plotly)
+library(dplyr)
+library(shinyalert)
+library(rmarkdown)
+library(shinyWidgets)
+library(egg)
+doseresposta=function(x,
+                      y,
+                      model=L.4(),
+                      ylab = "Proportion",
+                      xlab = "Concentration",
+                      point="all",
+                      pointsize = 4,
+                      linesize=1,
+                      pointshape = 21,
+                      textsize = 12,
+                      titlesize = 12,
+                      fontfamily="sans",
+                      ED=50,
+                      log=FALSE,
+                      sample=1000,
+                      force.ED=50,
+                      round=0,
+                      add.ED=TRUE,
+                      add.icED=TRUE,
+                      add.ic=FALSE,
+                      fill.icED="lightblue",
+                      theme=theme_classic(),
+                      scale.x=NA){
+  mod <- drm(y ~ x, fct = model)
+  anali=data.frame(summary(mod)$coefficients)
+  analise=data.frame(cbind(rownames(anali),anali))
+  colnames(analise)=c("Coef","Estimate","Std Error","t value","p value")
+  a=plot(mod)
+  b=ED(mod,c(ED),interval = "delta")
+  
+  xp=seq(min(x),max(y),length=sample)
+  yp=predict(mod,newdata=data.frame(x=xp))
+  xpf=xp[round(yp,round)==force.ED][1]
+  
+  ioc <- expand.grid(x=seq(min(x),max(x), length=100))
+  pm <- predict(mod, newdata=ioc, interval="confidence") 
+  ioc$p <- pm[,1]
+  ioc$pmin <- pm[,2]
+  ioc$pmax <- pm[,3]
+  if(point=="all"){graph=ggplot(data.frame(x,y),aes(y=y,x=x))+
+    theme+
+    xlab(xlab)+ylab(ylab)+
+    theme(axis.text = element_text(size=textsize,color = "black",family = fontfamily),
+          axis.title = element_text(size=titlesize,color="black",family = fontfamily))+
+    geom_point(shape=pointshape,fill="gray60",size=pointsize)+
+    geom_line(data=a,aes(x=x,y=`1`),size=linesize)}
+  
+  if(point=="mean"){graph=ggplot(data.frame(x,y),aes(y=y,x=x))+
+    theme+
+    xlab(xlab)+ylab(ylab)+
+    theme(axis.text = element_text(size=textsize,color = "black",family = fontfamily),
+          axis.title = element_text(size=titlesize,color="black",family = fontfamily))+
+    stat_summary(shape=pointshape,fill="gray60",size=pointsize/3)+
+    geom_line(data=a,aes(x=x,y=`1`),size=linesize)}
+  
+  if(add.ED==TRUE & add.icED==TRUE){
+    graph=graph+annotate(geom = "rect", xmax = b[4], xmin = b[3], 
+                         ymin = -Inf, ymax = Inf,fill=fill.icED,
+                         alpha=.1)+geom_vline(xintercept = b[1],size=linesize*0.8,lty=2)}
+  if(add.ED==TRUE & add.icED==FALSE){
+    graph=graph+geom_vline(xintercept = b[1],size=linesize*0.8,lty=2)}
+  if(add.ic==TRUE){graph=graph+geom_ribbon(data=ioc, aes(x=x, y=p, ymin=pmin, ymax=pmax), alpha=0.2)}
+  if(log==TRUE){graph=graph+scale_x_log10()}
+  if(is.na(scale.x[1])==FALSE){graph=graph+scale_x_log10(breaks=scale.x)}
+  list(graph,analise,xpf)}
+
+plot_cor=function(x,y,
+                  method="pearson",
+                  ylab="Dependent",
+                  xlab="Independent",
+                  theme=theme_classic(),
+                  pointsize=5,
+                  shape=21,
+                  fill="gray",
+                  color="black",
+                  axis.size=12,
+                  legend.text=5,
+                  ic=TRUE,
+                  title=NA,
+                  family="sans"){
+  if(is.na(title)==TRUE){
+    if(method=="pearson"){title="Pearson correlation"}
+    if(method=="spearman"){title="Spearman correlation"}
+  }
+  if(method=="pearson"){corre=cor(y,x)
+  pvalor=cor.test(y,x,method="pearson",exact=FALSE)$p.value}
+  if(method=="spearman"){corre=cor(y,x,method = "spearman")
+  pvalor=cor.test(y,x,method="spearman",exact=FALSE)$p.value}
+  requireNamespace("ggplot2")
+  data=data.frame(y,x)
+  ggplot(data,aes(y=y,x=x))+
+    geom_point(shape=shape,fill=fill,color=color,size=pointsize)+
+    geom_smooth(color=color,method = "lm")+
+    theme+labs(title=title,x=xlab,y=ylab)+
+    theme(axis.text = element_text(size=axis.size,
+                                   color="black",family = family),
+          legend.text = element_text(size=axis.size,color="black",family = family),
+          title=element_text(size=axis.size),
+          axis.title = element_text(size=axis.size,family = family))+
+    annotate(geom = "text",x = -Inf,y=Inf,size=legend.text,
+             label=paste("R = ", round(corre,2), ", p-value =",
+                         format(round(pvalor,3),scientific = TRUE),sep = ""),
+             hjust = -0.1, vjust = 1.1)}
+
+themes <- list("classic"=theme_classic(),
+               "Light" = theme_light(),
+               "Minimal" = theme_minimal(),
+               "bw"=theme_bw(),
+               "dark"=theme_dark(),
+               "replace"=theme_replace(),
+               "test"=theme_test())
+listamodelos=c("N","loess0","loess1","loess2", "LM0.5","LM1","LM2","LM3","LM4", "LM0.5_i","LM1_i","LM2_i","LM3_i","LM4_i",
+               "LM13", "LM13i", "LM23", "LM23i", "LM2i3", "valcam", "L3","L4","L5", "LL3", "LL4", "LL5", "BC4","BC5",
+               "CD4","CD5", "weibull3","weibull4", "GP2","GP3","GP4", "VB", "lo3", "lo4", "beta", "gaussian3", "gaussian4",
+               "linear.linear","linear.plateau","quadratic.plateau","plateau.linear","plateau.quadratic", "log","log2",
+               "thompson","asymptotic","asymptotic_neg","asymptotic_i","asymptotic_ineg", "biexponential","mitscherlich",
+               "yieldloss","hill","MM2","MM3","SH","page","newton", "potential","midilli","midillim","AM","peleg","VG")
+descricao=c("Graph for not significant trend",
+            "Loess non-parametric degree 0",
+            "Loess non - parametric degree 1",
+            "Loess non - parametric degree 2",
+            "Quadratic inverse",
+            "Linear regression",
+            "Quadratic",
+            "Cubic",
+            "Quartic",
+            "Quadratic inverse without intercept",
+            "Linear without intercept",
+            "Quadratic regression without intercept",
+            "Cubic without intercept",
+            "Quartic without intercept",
+            "Cubic without beta2",
+            "Cubic inverse without beta2",
+            "Cubic without beta1",
+            "Cubic inverse without beta2",
+            "Cubic without beta1, with inverse beta3",
+            "Valcam",
+            "Three - parameter logistics",
+            "Four - parameter logistics",
+            "Five - parameter logistics",
+            "Three - parameter log - logistics",
+            "Four - parameter log - logistics",
+            "Five - parameter log - logistics",
+            "Brain - Cousens with four parameter",
+            "Brain - Cousens with five parameter",
+            "Cedergreen - Ritz - Streibig with four parameter",
+            "Cedergreen - Ritz - Streibig with five parameter",
+            "Weibull with three parameter",
+            "Weibull with four parameter",
+            "Gompertz with two parameter",
+            "Gompertz with three parameter",
+            "Gompertz with four parameter",
+            "Von Bertalanffy",
+            "Lorentz with three parameter",
+            "Lorentz with four parameter",
+            "Beta",
+            "Analogous to the Gaussian model / Bragg with three parameters",
+            "Analogous to the Gaussian model / Bragg with four parameters",
+            "Linear - linear",
+            "Linear - plateau",
+            "Quadratic - plateau",
+            "Plateau - linear",
+            "Plateau - Quadratic",
+            "Logarithmic",
+            "Logarithmic quadratic",
+            "Thompson",
+            "Exponential",
+            "Exponential negative",
+            "Exponential without intercept",
+            "Exponential negative without intercept",
+            "Biexponential",
+            "Mitscherlich",
+            "Yield - loss",
+            "Hill",
+            "Michaelis - Menten with two parameter",
+            "Michaelis - Menten with three parameter",
+            "Steinhart - Hart",
+            "Page",
+            "Newton",
+            "Potential",
+            "Midilli",
+            "Modified Midilli",
+            "Avhad and Marchetti",
+            "Peleg",
+            "Vega-Galvez")
+
+ui = navbarPage("AgroReg Shiny App",
+                collapsible = TRUE,
+                tags$head(tags$style(HTML('.navbar-static-top {background-color: #edf5f1; font-size: 16px;font-weight: bold;}',
+                                          '.navbar-default .navbar-nav>.active>a {background-color: #edf5f1;}'))),
+                header = tagList(
+                  useShinydashboard()
+                ),
+                windowTitle = "AgroReg Shiny App",
+                tabPanel("Home",icon = icon("home"),
+                         sidebarLayout(
+                           sidebarPanel(
+                             h3("Bem-vindo ao AgroReg Shiny!!!"),br(),br(),
+                             "Desenvolvedor:",br(),
+                             "Prof. Msc. Gabriel Danilo Shimizu",br(),br(),
+                             "Contribuição:",br(),
+                             "Prof. Dr. Leandro S. A. Gonçalves",br(),
+                             "Prof. Dr. Rodrigo Y. P. Marubayashi",br(),br(),
+                             "Data de atualização: (27/03/2022)",br(),
+                             "O AgroReg Shiny é uma aplicativo Shiny em desenvolvimento que integra o pacote",
+                             a("AgroReg",href="https://cran.r-project.org/web/packages/AgroReg/index.html"),"do",
+                             a("Software R",href="https://www.r-project.org/"),br(),br(),
+                             div(img(src="https://www.gov.br/cnpq/pt-br/canais_atendimento/identidade-visual/CNPq_v2017_rgb.png", width="200px",heigth="200px"), style="text-align: center;"),br(),br(),
+                             div(img(src="http://www.uel.br/proex/Img/logo_uel.gif", width="200px",heigth="200px"), style="text-align: center;"),br(),br(),
+                             div(img(src="https://pos.uel.br/pgagro/wp-content/uploads/2021/06/LOGO-POS.jpeg", width="100px",heigth="100px"), style="text-align: center;"),br(),br()),
+                           mainPanel(                                 
+                             div(img(src="https://github.com/AgronomiaR/images/blob/main/surface.png?raw=true", width="50%",heigth="50%"), style="text-align: center;"),
+                             # img(src="https://github.com/AgronomiaR/images/blob/main/uel.jpg?raw=true", width="100%",heigth="100%"),
+                             h3("Referências"),
+                             "Shimizu, G. D. Gonçalves, L. S. A. AgroReg: Regression Analysis Linear and Nonlinear for Agriculture. (2022). R package version 1.2.1. Disponível em: https://cran.r-project.org/web/packages/AgroReg/index.html "))),
+                tabPanel("Lista de Modelos",
+                         shiny::dataTableOutput("listamodelos")),
+                
+                tabPanel("Correlação",
+                         icon = icon("chart-line"),
+                         sidebarLayout(
+                           sidebarPanel(
+                             br(),width = 3,
+                             actionButton("goC",#"RUN",
+                                          div(icon("play-circle"),"  RUN"), width = "20%",
+                                          style = "color: white; 
+                                          font-family: 'Arial', sans-serif;
+                                          background-color: #013220; 
+                                          font-size: 26px;
+                                          height: 45px;
+                                          width: 100%;
+                                          display: flex;
+                                          align-items: center;
+                                          justify-content: center"),br(),
+                             tags$style(".well {background-color: #edf5f1;}"),
+                             br(),br(),
+                             div(img(src="https://www.gov.br/cnpq/pt-br/canais_atendimento/identidade-visual/CNPq_v2017_rgb.png",
+                                     width="200px",heigth="200px"), style="text-align: center;"),br(),br(),
+                             div(img(src="http://www.uel.br/proex/Img/logo_uel.gif",
+                                     width="200px",heigth="200px"), style="text-align: center;"),br(),br(),
+                             div(img(src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/R_logo.svg/1200px-R_logo.svg.png",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br(),br(),
+                             div(img(src="https://scontent.fbfh5-1.fna.fbcdn.net/v/t1.6435-9/37624287_659510911065546_9160011944864776192_n.jpg?_nc_cat=106&ccb=1-5&_nc_sid=09cbfe&_nc_eui2=AeGBjvpTLsIK6HzYXIUNaIcjcqD125IVRHRyoPXbkhVEdGm87o3Wa_mgqCMt9-v07LlAQsiJ2ntodx2E1APjM6UI&_nc_ohc=RxdPInM86MMAX96qN6y&_nc_ht=scontent.fbfh5-1.fna&oh=00_AT8anQFWWy0T8XDayhGSImtmU7np02fcV-5NBNkRyypFDg&oe=621551FD",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br(),
+                             div(img(src="https://pos.uel.br/pgagro/wp-content/uploads/2021/06/LOGO-POS.jpeg",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br()
+                           ),
+                           mainPanel(
+                             tabsetPanel(type="tabs",
+                                         tabPanel(title = "Data insert",
+                                                  "O App Shiny AgroReg permite a entrada de dados em extensão .csv (Separado por vírgula, ponto ou ponto e vírgula), .xls ou .xlsx",
+                                                  br(),
+                                                  "Obs. A tabulação dos dados deve ser feita em colunas, sendo cada um representado por um fator ou variável resposta",
+                                                  fluidRow(column(4,box(fileInput('uploadedcsvC', "File", 
+                                                                                  accept = c('.csv','.xls','.xlsx'),width = "200%",multiple = TRUE),width = "200%")),
+                                                           column(4,box(numericInput("planilhaC","Aba",value = 1,width = "50%"),width = "50%")),
+                                                           column(4,box(selectInput("deccsvC","Separação CSV",choices = c(",",";","."),selected = ",",
+                                                                                    width = "50%"),width = "50%")),br()),
+                                                  tags$head(tags$style(HTML("input[type='text']{font-size: 16px;}"))),
+                                                  tags$style(".btn-file {background-color: #edf5f; font-size: 16px; border-color: black;}"),
+                                                  fluidRow(
+                                                    br(),
+                                                    column(4,box(selectInput("XG", "Variável X", choices = "Tratamento" ),width = "50%",background = "navy")),
+                                                    column(4,box(selectInput("YG", "Variável Y", choices = "Resposta" ),width = "50%",background = "navy"))))),
+                             tabsetPanel(type = "tabs",
+                                         tabPanel("Dataset",
+                                                  shiny::dataTableOutput("datatableC")),
+                                         tabPanel("Gráfico de correlação",
+                                                  tags$head(tags$style(HTML("#regre {font-size: 16px;}"))),
+                                                  selectInput("metodo","Método",choices = c("Pearson","Spearman"),selected = "Pearson"),
+                                                  plotOutput("corre"), br(),br(),br(),br(),br(),br(),br(),br(),br(),br(),
+                                                  bootstrapPage(
+                                                    div(style="display:inline-block",numericInput('widthC', 'Comprimento da figura', value = 800)),
+                                                    div(style="display:inline-block",numericInput('heightC', 'Altura da figura', value = 500)),
+                                                    div(style="display:inline-block",textInput('ylabC', 'Nome eixo Y', value = "Dependent")),#br(),
+                                                    div(style="display:inline-block",textInput('xlabC', 'Nome eixo X', value = "Independent")),
+                                                    div(style="display:inline-block",numericInput("pointshapeC","Tipo de ponto",value=21)),
+                                                    div(style="display:inline-block",numericInput("pointsizeC","Tamanho de ponto",value=7)),
+                                                    div(style="display:inline-block",numericInput("legendsizeC","Tamanho de legenda",value=7)),#br(),
+                                                    div(style="display:inline-block",textInput("fontfamilyC","Fonte",value="sans")),#br(),
+                                                    div(style="display:inline-block",numericInput('textsizeC', 'Tamanho de texto', value = 22)),
+                                                    div(style="display:inline-block",selectInput("themaC", "Select theme for plot", choices = names(themes)))),br(),br(),br())),
+                             verbatimTextOutput("analysisC"))
+                         )),
+                tabPanel("Regressão",
+                         icon = icon("chart-line"),
+                         sidebarLayout(
+                           sidebarPanel(
+                             br(),width = 3,
+                             actionButton("go",#"RUN",
+                                          div(icon("play-circle"),"  RUN"), width = "20%",
+                                          style = "color: white; 
+                                          font-family: 'Arial', sans-serif;
+                                          background-color: #013220; 
+                                          font-size: 26px;
+                                          height: 45px;
+                                          width: 100%;
+                                          display: flex;
+                                          align-items: center;
+                                          justify-content: center"),br(),
+                             tags$style(".well {background-color: #edf5f1;}"),
+                             br(),br(),
+                             div(img(src="https://www.gov.br/cnpq/pt-br/canais_atendimento/identidade-visual/CNPq_v2017_rgb.png",
+                                     width="200px",heigth="200px"), style="text-align: center;"),br(),br(),
+                             div(img(src="http://www.uel.br/proex/Img/logo_uel.gif",
+                                     width="200px",heigth="200px"), style="text-align: center;"),br(),br(),
+                             div(img(src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/R_logo.svg/1200px-R_logo.svg.png",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br(),br(),
+                             div(img(src="https://scontent.fbfh5-1.fna.fbcdn.net/v/t1.6435-9/37624287_659510911065546_9160011944864776192_n.jpg?_nc_cat=106&ccb=1-5&_nc_sid=09cbfe&_nc_eui2=AeGBjvpTLsIK6HzYXIUNaIcjcqD125IVRHRyoPXbkhVEdGm87o3Wa_mgqCMt9-v07LlAQsiJ2ntodx2E1APjM6UI&_nc_ohc=RxdPInM86MMAX96qN6y&_nc_ht=scontent.fbfh5-1.fna&oh=00_AT8anQFWWy0T8XDayhGSImtmU7np02fcV-5NBNkRyypFDg&oe=621551FD",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br(),
+                             div(img(src="https://pos.uel.br/pgagro/wp-content/uploads/2021/06/LOGO-POS.jpeg",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br()
+                           ),
+                           mainPanel(
+                             tabsetPanel(type="tabs",
+                                         tabPanel(title = "Data insert",
+                                                  "O App Shiny AgroReg permite a entrada de dados em extensão .csv (Separado por vírgula, ponto ou ponto e vírgula), .xls ou .xlsx",
+                                                  br(),
+                                                  "Obs. A tabulação dos dados deve ser feita em colunas, sendo cada um representado por um fator ou variável resposta",
+                                                  fluidRow(column(4,box(fileInput('uploadedcsv', "File", 
+                                                                                  accept = c('.csv','.xls','.xlsx'),width = "200%",multiple = TRUE),width = "200%")),
+                                                           column(4,box(numericInput("planilha","Aba",value = 1,width = "50%"),width = "50%")),
+                                                           column(4,box(selectInput("deccsv","Separação CSV",choices = c(",",";","."),selected = ",",
+                                                                                    width = "50%"),width = "50%")),br()),
+                                                  tags$head(tags$style(HTML("input[type='text']{font-size: 16px;}"))),
+                                                  tags$style(".btn-file {background-color: #edf5f; font-size: 16px; border-color: black;}"),
+                                                  fluidRow(
+                                                    br(),
+                                                    column(4,box(selectInput("tratAg", "Variável independente", choices = "Tratamento" ),width = "50%",background = "navy")),
+                                                    column(4,box(selectInput("respAg", "Variável dependente", choices = "Resposta" ),width = "50%",background = "navy"))))),
+                             tabsetPanel(type = "tabs",
+                                         tabPanel("Dataset",
+                                                  shiny::dataTableOutput("datatable")),
+                                         tabPanel("Análise de regressão",br(),
+                                                  textInput("model", label = "Modelo de regressão", value = "1"),br(),
+                                                  div(style="display:inline-block",selectInput("r2","R2",choices = c("all","mean"),selected = "all")),
+                                                  tags$head(tags$style(HTML("#regreprint {font-size: 16px;}"))),br(),br(),
+                                                  # shiny::dataTableOutput("coefficients"),br(),
+                                                  box(width = 8,verbatimTextOutput("regreprint"))),
+                                         tabPanel("Gráfico de regressão",
+                                                  tags$head(tags$style(HTML("#regre {font-size: 16px;}"))),
+                                                  plotOutput("regre"), br(),br(),br(),br(),br(),br(),br(),br(),br(),br(),
+                                                  bootstrapPage(
+                                                    div(style="display:inline-block",numericInput('width', 'Comprimento da figura', value = 800)),
+                                                    div(style="display:inline-block",numericInput('height', 'Altura da figura', value = 500)),
+                                                    div(style="display:inline-block",textInput('ylab', 'Nome eixo Y', value = "Dependent")),br(),
+                                                    
+                                                    div(style="display:inline-block",textInput('xlab', 'Nome eixo X', value = "Independent")),
+                                                    div(style="display:inline-block",numericInput("widthbar","Largura barra",value=NA)),
+                                                    div(style="display:inline-block",numericInput("linesize","Tamanho de linha",value=0.8)),br(),
+                                                    
+                                                    div(style="display:inline-block",selectInput("thema", "Select theme for plot", choices = names(themes))),
+                                                    div(style="display:inline-block",selectInput("point","Plotagem de ponto",choices = c('all','mean'),selected = "all")),
+                                                    div(style="display:inline-block",selectInput('error', 'Adicionar barra de erro', choices = c("SE","SD","FALSE"),selected = "SE")),br(),
+                                                    
+                                                    div(style="display:inline-block",numericInput("pointshape","Tipo de ponto",value=21)),
+                                                    div(style="display:inline-block",numericInput("pointsize","Tamanho de ponto",value=7)),
+                                                    div(style="display:inline-block",numericInput("round","Casas decimais",value=3)),br(),
+                                                    
+                                                    div(style="display:inline-block",textInput("xname","Nome X equação",value="x")),
+                                                    div(style="display:inline-block",textInput("yname","Nome de Y equação",value="y")),
+                                                    div(style="display:inline-block",textInput("fontfamily","Fonte",value="sans")),br(),
+                                                    
+                                                    div(style="display:inline-block",textInput('legendposition', 'Posição da equação', value = "top")),
+                                                    div(style="display:inline-block",numericInput('textsize', 'Tamanho de texto', value = 22)),
+                                                    div(style="display:inline-block",numericInput('labelsize', 'Tamanho de rotulo', value = 7))),br(),br(),br())),
+                             verbatimTextOutput("analysis"))
+                         )),
+                
+                tabPanel("Regressão (>2 categorias)",
+                         # header = tagList(
+                         #   useShinydashboard()
+                         # ),
+                         icon = icon("chart-line"),
+                         sidebarLayout(
+                           sidebarPanel(
+                             br(),width = 3,
+                             actionButton("go1",#"RUN",
+                                          div(icon("play-circle"),"  RUN"), width = "20%",
+                                          style = "color: white; 
+                                          font-family: 'Arial', sans-serif;
+                                          background-color: #013220; 
+                                          font-size: 26px;
+                                          height: 45px;
+                                          width: 100%;
+                                          display: flex;
+                                          align-items: center;
+                                          justify-content: center"),br(),
+                             tags$style(".well {background-color: #edf5f1;}"),
+                             br(),br(),
+                             div(img(src="https://www.gov.br/cnpq/pt-br/canais_atendimento/identidade-visual/CNPq_v2017_rgb.png",
+                                     width="200px",heigth="200px"), style="text-align: center;"),br(),br(),
+                             div(img(src="http://www.uel.br/proex/Img/logo_uel.gif",
+                                     width="200px",heigth="200px"), style="text-align: center;"),br(),br(),
+                             div(img(src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/R_logo.svg/1200px-R_logo.svg.png",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br(),br(),
+                             div(img(src="https://scontent.fbfh5-1.fna.fbcdn.net/v/t1.6435-9/37624287_659510911065546_9160011944864776192_n.jpg?_nc_cat=106&ccb=1-5&_nc_sid=09cbfe&_nc_eui2=AeGBjvpTLsIK6HzYXIUNaIcjcqD125IVRHRyoPXbkhVEdGm87o3Wa_mgqCMt9-v07LlAQsiJ2ntodx2E1APjM6UI&_nc_ohc=RxdPInM86MMAX96qN6y&_nc_ht=scontent.fbfh5-1.fna&oh=00_AT8anQFWWy0T8XDayhGSImtmU7np02fcV-5NBNkRyypFDg&oe=621551FD",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br(),
+                             div(img(src="https://pos.uel.br/pgagro/wp-content/uploads/2021/06/LOGO-POS.jpeg",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br()
+                           ),
+                           mainPanel(
+                             tabsetPanel(type="tabs",
+                                         tabPanel(title = "Data insert",
+                                                  "O App Shiny AgroReg permite a entrada de dados em extensão .csv (Separado por vírgula, ponto ou ponto e vírgula), .xls ou .xlsx",
+                                                  br(),
+                                                  "Obs. A tabulação dos dados deve ser feita em colunas, sendo cada um representado por um fator ou variável resposta",
+                                                  fluidRow(column(4,box(fileInput('uploadedcsv1', "File", 
+                                                                                  accept = c('.csv','.xls','.xlsx'),width = "200%",multiple = TRUE),
+                                                                        width = "200%")),
+                                                           column(4,box(numericInput("planilha1","Aba",value = 1,width = "50%"),width = "50%")),
+                                                           column(4,box(selectInput("deccsv1","Separação CSV",choices = c(",",";","."),selected = ",",
+                                                                                    width = "50%"),width = "50%")),br()),
+                                                  tags$head(tags$style(HTML("input[type='text']{font-size: 16px;}"))),
+                                                  tags$style(".btn-file {background-color: #edf5f; font-size: 16px; border-color: black;}"),
+                                                  fluidRow(
+                                                    br(),
+                                                    column(4,box(selectInput("tratAg1", "Variável independente", choices = "Tratamento" ),width = "50%",background = "navy")),
+                                                    column(4,box(selectInput("respAg1", "Variável dependente", choices = "Resposta" ),width = "50%",background = "navy")),
+                                                    column(4,box(selectInput("catAg1", "Variável categórica", choices = "Resposta" ),width = "50%",background = "navy"))))),
+                             tabsetPanel(type = "tabs",
+                                         tabPanel("Dataset",
+                                                  shiny::dataTableOutput("datatable1")),
+                                         tabPanel("Análise de regressão",br(),
+                                                  textInput("model1", label = "Modelo de regressão", value = "1"),br(),
+                                                  div(style="display:inline-block",selectInput("r21","R2",choices = c("all","mean"),selected = "all")),
+                                                  tags$head(tags$style(HTML("#regreprint1 {font-size: 16px;}"))),br(),br(),
+                                                  box(width = 8,verbatimTextOutput("regreprint1"))),
+                                         tabPanel("Parâmetros estatísticos",br(),
+                                                  box(width = 8,shiny::dataTableOutput("regrecomp1"))),
+                                         tabPanel("Outros parâmetros",br(),
+                                                  box(width = 8,shiny::dataTableOutput("regrecompo1"))),
+                                         tabPanel("Gráfico de regressão",
+                                                  tags$head(tags$style(HTML("#regre1 {font-size: 16px;}"))),
+                                                  plotOutput("regre1"), br(),br(),br(),br(),br(),br(),br(),br(),br(),br(),
+                                                  bootstrapPage(
+                                                    div(style="display:inline-block",numericInput('width1', 'Comprimento da figura', value = 800)),
+                                                    div(style="display:inline-block",numericInput('height1', 'Altura da figura', value = 500)),
+                                                    div(style="display:inline-block",textInput('ylab1', 'Nome eixo Y', value = "Dependent")),br(),
+                                                    
+                                                    div(style="display:inline-block",textInput('xlab1', 'Nome eixo X', value = "Independent")),
+                                                    div(style="display:inline-block",numericInput("widthbar1","Largura barra",value=NA)),
+                                                    div(style="display:inline-block",numericInput("linesize1","Tamanho de linha",value=0.8)),br(),
+                                                    
+                                                    div(style="display:inline-block",selectInput("thema1", "Select theme for plot", choices = names(themes))),
+                                                    div(style="display:inline-block",selectInput("point1","Plotagem de ponto",choices = c('all','mean'),selected = "all")),
+                                                    div(style="display:inline-block",selectInput('error1', 'Adicionar barra de erro', choices = c("SE","SD","FALSE"),selected = "SE")),br(),
+                                                    
+                                                    div(style="display:inline-block",numericInput("pointshape1","Tipo de ponto",value=21)),
+                                                    div(style="display:inline-block",numericInput("pointsize1","Tamanho de ponto",value=7)),
+                                                    div(style="display:inline-block",numericInput("round1","Casas decimais",value=NA)),br(),
+                                                    
+                                                    div(style="display:inline-block",textInput("xname1","Nome X equação",value="x")),
+                                                    div(style="display:inline-block",textInput("yname1","Nome de Y equação",value="y")),
+                                                    div(style="display:inline-block",textInput("fontfamily1","Fonte",value="sans")),br(),
+                                                    
+                                                    div(style="display:inline-block",textInput('legendposition1', 'Posição da equação', value = "top")),
+                                                    div(style="display:inline-block",numericInput('legendsize1', 'Tamanho da legenda', value = 22)),
+                                                    div(style="display:inline-block",numericInput('textsize1', 'Tamanho de texto', value = 22)),
+                                                    div(style="display:inline-block",numericInput('labelsize1', 'Tamanho de rotulo', value = 7))),br(),br(),br())),
+                             verbatimTextOutput("analysis1"))
+                           )),
+                
+                tabPanel("Dose-Resposta",
+                         icon = icon("chart-line"),
+                         header = tagList(
+                           useShinydashboard()
+                         ),
+                         sidebarLayout(
+                           sidebarPanel(
+                             br(),width = 3,
+                             actionButton("godose",#"RUN",
+                                          div(icon("play-circle"),"  RUN"), width = "20%",
+                                          style = "color: white; 
+                                          font-family: 'Arial', sans-serif;
+                                          background-color: #013220; 
+                                          font-size: 26px;
+                                          height: 45px;
+                                          width: 100%;
+                                          display: flex;
+                                          align-items: center;
+                                          justify-content: center"),br(),
+                             tags$style(".well {background-color: #edf5f1;}"),
+                             br(),br(),
+                             div(img(src="https://www.gov.br/cnpq/pt-br/canais_atendimento/identidade-visual/CNPq_v2017_rgb.png",
+                                     width="200px",heigth="200px"), style="text-align: center;"),br(),br(),
+                             div(img(src="http://www.uel.br/proex/Img/logo_uel.gif",
+                                     width="200px",heigth="200px"), style="text-align: center;"),br(),br(),
+                             div(img(src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/R_logo.svg/1200px-R_logo.svg.png",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br(),br(),
+                             div(img(src="https://scontent.fbfh5-1.fna.fbcdn.net/v/t1.6435-9/37624287_659510911065546_9160011944864776192_n.jpg?_nc_cat=106&ccb=1-5&_nc_sid=09cbfe&_nc_eui2=AeGBjvpTLsIK6HzYXIUNaIcjcqD125IVRHRyoPXbkhVEdGm87o3Wa_mgqCMt9-v07LlAQsiJ2ntodx2E1APjM6UI&_nc_ohc=RxdPInM86MMAX96qN6y&_nc_ht=scontent.fbfh5-1.fna&oh=00_AT8anQFWWy0T8XDayhGSImtmU7np02fcV-5NBNkRyypFDg&oe=621551FD",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br(),
+                             div(img(src="https://pos.uel.br/pgagro/wp-content/uploads/2021/06/LOGO-POS.jpeg",
+                                     width="100px",heigth="100px"), style="text-align: center;"),br()
+                           ),
+                           mainPanel(
+                             tabsetPanel(type="tabs",
+                                         tabPanel(title = "Data insert",
+                                                  "O App Shiny AgroReg permite a entrada de dados em extensão .csv (Separado por vírgula, ponto ou ponto e vírgula), .xls ou .xlsx",
+                                                  br(),
+                                                  "Obs. A tabulação dos dados deve ser feita em colunas, sendo cada um representado por um fator ou variável resposta",
+                                                  fluidRow(column(4,box(fileInput('uploadedcsv3', "File", 
+                                                                                  accept = c('.csv','.xls','.xlsx'),width = "200%",multiple = TRUE),width = "200%")),
+                                                           column(4,box(numericInput("planilha3","Aba",value = 1,width = "50%"),width = "50%")),
+                                                           column(4,box(selectInput("deccsv3","Separação CSV",choices = c(",",";","."),selected = ",",
+                                                                                    width = "50%"),width = "50%")),br()),
+                                                  tags$head(tags$style(HTML("input[type='text']{font-size: 16px;}"))),
+                                                  tags$style(".btn-file {background-color: #edf5f; font-size: 16px; border-color: black;}"),
+                                                  fluidRow(
+                                                    br(),
+                                                    column(4,box(selectInput("tratAg3", "Variável independente", choices = "Tratamento" ),width = "50%",background = "navy")),
+                                                    column(4,box(selectInput("respAg3", "Variável dependente", choices = "Resposta" ),width = "50%",background = "navy"))))),
+                             tabsetPanel(type = "tabs",
+                                         tabPanel("Dataset",
+                                                  shiny::dataTableOutput("datatable3")),
+                                         tabPanel("Modelo",br(),
+                                                  selectInput("model3", 
+                                                              label = "Modelo de regressão",choices = c("L.4","L.3"),
+                                                              selected = "L.4"),br(),
+                                                  numericInput("calcED", 
+                                                              label = "Dose letal",min = 0,max=100,value = 50),br(),
+                                                  tags$head(tags$style(HTML("#regreprint3 {font-size: 16px;}"))),br(),br(),
+                                                  box(width = 8,dataTableOutput("regreprint3"))),
+                                         tabPanel("Informações",
+                                                  br(),br(),
+                                                  "Nota: Observe que o ED, DL ou EC usa como base o valor de maior resposta para Y e não necessariamente o valor de 100% por exemplo",
+                                                  br(),br(),
+                                                  infoBoxOutput("ED"),
+                                                  infoBoxOutput("ED1"),
+                                                  br(),br(),br(),br(),br(),br(),br(),br(),br(),
+                                                  "No caso de estimar um valor de dose letal desconsiderando o limite superior da curva, use a opção abaixo. Note que é necessário simular dados para obter um valor aproximado. Use o arredondamento e aumente o número de simulações para melhor a precisão",
+                                                  br(),br(),
+                                                  numericInput("EDsim",label = "Número de dados simulados",value = 1000),
+                                                  numericInput("EDdec",label = "Número casas decimais",value = 0),
+                                                  numericInput("ED4",label = "Valor de Y",value = 50),
+                                                  infoBoxOutput("ED5")),
+                                         tabPanel("Gráfico de regressão",
+                                                  tags$head(tags$style(HTML("#regre1 {font-size: 16px;}"))),
+                                                  plotOutput("regredose"), br(),br(),br(),br(),br(),br(),br(),br(),br(),br(),
+                                                  bootstrapPage(
+                                                    div(style="display:inline-block",numericInput('width3', 'Comprimento da figura', value = 800)),
+                                                    div(style="display:inline-block",numericInput('height3', 'Altura da figura', value = 500)),
+                                                    div(style="display:inline-block",textInput('ylab3', 'Nome eixo Y', value = "Proportion")),
+                                                    div(style="display:inline-block",textInput('xlab3', 'Nome eixo X', value = "Doses")),
+                                                    div(style="display:inline-block",numericInput("linesize3","Tamanho de linha",value=0.8)),
+                                                    div(style="display:inline-block",numericInput("pointshape3","Tipo de ponto",value=21)),
+                                                    div(style="display:inline-block",numericInput("pointsize3","Tamanho de ponto",value=7)),
+                                                    div(style="display:inline-block",textInput("fontfamily3","Fonte",value="sans")),
+                                                    div(style="display:inline-block",numericInput('textsize3', 'Tamanho de texto', value = 22)),
+                                                    div(style="display:inline-block",numericInput('labelsize3', 'Tamanho de rotulo', value = 7)),
+                                                    div(style="display:inline-block",numericInput('constantED', 'Somar constante', value = 0)),br(),
+                                                    div(style="display:inline-block",selectInput('EDlog', 'Escala Log', choices = c("Sim","Não"),selected = "Sim")),
+                                                    div(style="display:inline-block",selectInput('pointDR', 'Ponto', choices = c("all","mean"),selected = "all")),
+                                                    div(style="display:inline-block",selectInput('adddose3', 'Adicionar dose letal', choices = c("Sim","Não"),selected = "Sim")),
+                                                    div(style="display:inline-block",selectInput('addIC', 'Adicionar IC', choices = c("Sim","Não"),selected = "Não")),
+                                                    div(style="display:inline-block",selectInput("thema3", "Select theme for plot", choices = names(themes)))),br(),br(),br())),
+                             verbatimTextOutput("analysisdose"))
+                         )))
+
+server=function(input, output, session){
+  
+  #=============================================================================
+  # lista
+  output$listamodelos=shiny::renderDataTable(data.frame(Uso=1:length(listamodelos), Função=listamodelos, Modelo=descricao))
+  
+  #=============================================================================
+  # Correlacao 
+  output$datatableC <- shiny::renderDataTable({
+    z <- reactive({
+      infile <- input$uploadedcsvC
+      if (is.null(infile)){return(cat("Adicione seu conjunto de dados"))}
+      ext=tools::file_ext(infile)
+      if(ext[1]=="xlsx"| ext[1]=="xls"){
+        tbl=data.frame(readxl::read_excel(infile$datapath,sheet = input$planilhaC))}
+      else{tbl=read.csv(infile$datapath, header = TRUE, sep = input$deccsvC)}
+    })
+    z()})
+  output$analysisC <- renderPrint({
+    z <- reactive({
+      infile <- input$uploadedcsvC
+      if (is.null(infile)){return(cat("Adicione seu conjunto de dados"))}
+      ext=tools::file_ext(infile)
+      if(ext[1]=="xlsx"| ext[1]=="xls"){
+        tbl=data.frame(readxl::read_excel(infile$datapath,sheet = input$planilhaC))}
+      else{tbl=read.csv(infile$datapath, header = TRUE, sep = input$deccsvC)}
+    })
+    observe({
+      vchoices <- names(z())
+      updateSelectInput(session, "XG", choices = vchoices,selected = names(z())[2])
+      updateSelectInput(session, "YG", choices = vchoices,selected = names(z())[3])})
+  })
+  corre <- eventReactive(input$goC,{
+    infile <- input$uploadedcsvC
+    if (is.null(infile)){return(cat("Selecione a coluna de tratamento e resposta"))}
+    ext=tools::file_ext(infile)
+    if(ext[1]=="xlsx"| ext[1]=="xls"){
+      tbl=data.frame(readxl::read_excel(infile$datapath,sheet = input$planilhaC))}
+    else{tbl=read.csv(infile$datapath, header = TRUE, sep = input$deccsvC)}
+    trat=tbl[,input$XG]
+    resp=tbl[,input$YG]
+    if(input$metodo=="Pearson"){metodo="pearson"}
+    if(input$metodo=="Spearman"){metodo="spearman"}
+    plot_cor(
+      x = trat,
+      y = resp,
+      method = metodo,
+      ylab=parse(text = input$ylabC),
+      xlab=parse(text = input$xlabC),
+      pointsize = input$pointsizeC,
+      shape = input$pointshapeC,
+      legend.text = input$legendsizeC,
+      family = input$fontfamilyC,
+      axis.size = input$textsize,
+      theme = themes[[input$themaC]])})
+  output$corre=renderPlot(corre(),width = function()input$width1,height = function()input$height1)
+  
+  #=============================================================================
+  # regressao 
+  output$datatable <- shiny::renderDataTable({
+    z <- reactive({
+      infile <- input$uploadedcsv
+      if (is.null(infile)){return(cat("Adicione seu conjunto de dados"))}
+      ext=tools::file_ext(infile)
+      if(ext[1]=="xlsx"| ext[1]=="xls"){
+        tbl=data.frame(readxl::read_excel(infile$datapath,sheet = input$planilha))}
+      else{tbl=read.csv(infile$datapath, header = TRUE, sep = input$deccsv)}
+    })
+    z()})
+  output$analysis <- renderPrint({
+    z <- reactive({
+      infile <- input$uploadedcsv
+      if (is.null(infile)){return(cat("Adicione seu conjunto de dados"))}
+      ext=tools::file_ext(infile)
+      if(ext[1]=="xlsx"| ext[1]=="xls"){
+        tbl=data.frame(readxl::read_excel(infile$datapath,sheet = input$planilha))}
+      else{tbl=read.csv(infile$datapath, header = TRUE, sep = input$deccsv)}
+    })
+    observe({
+      vchoices <- names(z())
+      updateSelectInput(session, "tratAg", choices = vchoices,selected = names(z())[2])
+      updateSelectInput(session, "respAg", choices = vchoices,selected = names(z())[3])})
+  })
+  regression1 <- eventReactive(input$go,{
+    infile <- input$uploadedcsv
+    if (is.null(infile)){return(cat("Selecione a coluna de tratamento e resposta"))}
+    ext=tools::file_ext(infile)
+    if(ext[1]=="xlsx"| ext[1]=="xls"){
+      tbl=data.frame(readxl::read_excel(infile$datapath,sheet = input$planilha))}
+    else{tbl=read.csv(infile$datapath, header = TRUE, sep = input$deccsv)}
+    trat=tbl[,input$tratAg]
+    resp=tbl[,input$respAg]
+    models=input$model
+    modelos=c("N","loess0","loess1","loess2", "LM0.5","LM1","LM2","LM3","LM4", "LM0.5_i","LM1_i","LM2_i","LM3_i","LM4_i",
+              "LM13", "LM13i", "LM23", "LM23i", "LM2i3", "valcam", "L3","L4","L5", "LL3", "LL4", "LL5", "BC4","BC5",
+              "CD4","CD5", "weibull3","weibull4", "GP2","GP3","GP4", "VB", "lo3", "lo4", "beta", "gaussian3", "gaussian4",
+              "linear.linear","linear.plateau","quadratic.plateau","plateau.linear","plateau.quadratic", "log","log2",
+              "thompson","asymptotic","asymptotic_neg","asymptotic_i","asymptotic_ineg", "biexponential","mitscherlich",
+              "yieldloss","hill","MM2","MM3","SH","page","newton", "potential","midilli","midillim","AM","peleg","VG")
+    a=AgroReg::regression(
+      trat = trat,
+      resp = resp,
+      model = modelos[as.numeric(models)],
+      ylab=parse(text = input$ylab),
+      xlab=parse(text = input$xlab),
+      point = input$point, 
+      width.bar = input$widthbar, 
+      error = input$error,
+      textsize = input$textsize,
+      pointsize = input$pointsize,
+      linesize = input$linesize,
+      pointshape = input$pointshape,
+      round = input$round,
+      fontfamily = input$fontfamily,
+      legend.position = input$legendposition,
+      theme = themes[[input$thema]])
+  })
+  # output$coefficients=shiny::renderDataTable(regression1()$Coefficients)
+  output$regreprint=renderPrint(regression1())
+  output$regre=renderPlot(regression1()[[]],width = function()input$width1,height = function()input$height1)
+  
+  #=============================================================================
+  # regressao 1 cat
+  output$datatable1 <- shiny::renderDataTable({
+    z <- reactive({
+      infile <- input$uploadedcsv1
+      if (is.null(infile)){return(cat("Adicione seu conjunto de dados"))}
+      ext=tools::file_ext(infile)
+      if(ext[1]=="xlsx"| ext[1]=="xls"){
+        tbl=data.frame(readxl::read_excel(infile$datapath,sheet = input$planilha1))}
+      else{tbl=read.csv(infile$datapath, header = TRUE, sep = input$deccsv1)}
+    })
+    z()})
+  output$analysis1 <- renderPrint({
+    z <- reactive({
+      infile1 <- input$uploadedcsv1
+      if (is.null(infile1)){return(cat("Adicione seu conjunto de dados"))}
+      ext=tools::file_ext(infile1)
+      if(ext[1]=="xlsx"| ext[1]=="xls"){
+        tbl=data.frame(readxl::read_excel(infile1$datapath,sheet = input$planilha1))}
+      else{tbl=read.csv(infile1$datapath, header = TRUE, sep = input$deccsv1)}
+    })
+    observe({
+      vchoices <- names(z())
+      updateSelectInput(session, "tratAg1", choices = vchoices,selected = names(z())[2])
+      updateSelectInput(session, "respAg1", choices = vchoices,selected = names(z())[3])
+      updateSelectInput(session, "catAg1", choices = vchoices,selected = names(z())[1])})
+  })
+  
+  regression2 <- eventReactive(input$go1,{
+    infile1 <- input$uploadedcsv1
+    if (is.null(infile1)){return(cat("Selecione a coluna de tratamento e resposta"))}
+    ext=tools::file_ext(infile1)
+    if(ext[1]=="xlsx"| ext[1]=="xls"){
+      tbl1=data.frame(readxl::read_excel(infile1$datapath,sheet = input$planilha1))}
+    else{tbl1=read.csv(infile1$datapath, header = TRUE, sep = input$deccsv1)}
+    trat=tbl1[,input$tratAg1]
+    resp=tbl1[,input$respAg1]
+    cate=tbl1[,input$catAg1]
+    xlab=parse(text=input$xlab1)
+    ylab=parse(text=input$ylab1)
+    model=input$model1
+    width=input$width1
+    height=input$height1
+    error=input$error1
+    widthbar=input$widthbar1
+    r2=input$r21
+    point=input$point1
+    linesize=input$linesize1
+    pointshape=input$pointshape1
+    pointsize=input$pointsize1
+    round=input$round1
+    xname=input$xname1
+    yname=input$yname1
+    fontfamily=input$fontfamily1
+    textsize=input$textsize1
+    labelsize=input$labelsize1
+    legend.position=input$legendposition1
+    graficos=list()
+    cate=factor(cate,unique(cate))
+    models1=as.vector(unlist(strsplit(input$model1, ",")))
+    modelos1=c("N","loess0","loess1","loess2", "LM0.5","LM1","LM2","LM3","LM4", "LM0.5_i","LM1_i","LM2_i","LM3_i","LM4_i",
+              "LM13", "LM13i", "LM23", "LM23i", "LM2i3", "valcam", "L3","L4","L5", "LL3", "LL4", "LL5", "BC4","BC5",
+              "CD4","CD5", "weibull3","weibull4", "GP2","GP3","GP4", "VB", "lo3", "lo4", "beta", "gaussian3", "gaussian4",
+              "linear.linear","linear.plateau","quadratic.plateau","plateau.linear","plateau.quadratic", "log","log2",
+              "thompson","asymptotic","asymptotic_neg","asymptotic_i","asymptotic_ineg", "biexponential","mitscherlich",
+              "yieldloss","hill","MM2","MM3","SH","page","newton", "potential","midilli","midillim","AM","peleg","VG")
+    for(i in 1:length(levels(cate))){
+      graficos[[i]]=AgroReg::regression(trat = trat[cate==levels(cate)[i]],
+                                        resp = resp[cate==levels(cate)[i]],
+                                        model = modelos1[as.numeric(models1[i])])
+    }
+    comparative_model1=function(models1,
+                               names_model=NA,
+                               plot=FALSE,
+                               round.label=2){
+      tabela=matrix(rep(NA,length(models1)*4),ncol=4)
+      for(i in 1:length(models1)){
+        tabela[i,]=c(models1[[i]]$values[5:8,2])}
+      tabela=data.frame(tabela)
+      if(is.na(names_model[1])==TRUE){rownames(tabela)=
+        paste("Model",1:length(models1))}else{
+          rownames(tabela)=names_model}
+      colnames(tabela)=c("AIC","BIC","R2","RMSE")
+      tabela}
+    a5=comparative_model1(graficos)
+    a4=plot_arrange(graficos,point = input$point1,ylab = input$yname1,xlab=input$xname1,
+                 pointsize = input$pointsize1,textsize = input$textsize1,
+                 fontfamily = input$fontfamily1,legendsize = input$legendsize1)
+    a6=stat_param(graficos)
+    a6=data.frame("Param"=rownames(a6),a6)
+    list(a5,a4,a6)
+    })
+  
+  output$regreprint1=renderPrint(regression2())
+  output$regrecomp1=shiny::renderDataTable(regression2()[[1]])
+  output$regrecompo1=shiny::renderDataTable(regression2()[[3]])
+  output$regre1=renderPlot(regression2()[[2]],width = function()input$width1,height = function()input$height1)
+  
+  #=============================================================================
+  # doseresposta
+  output$datatable3 <- shiny::renderDataTable({
+    z <- reactive({
+      infile <- input$uploadedcsv3
+      if (is.null(infile)){return(cat("Adicione seu conjunto de dados"))}
+      ext=tools::file_ext(infile)
+      if(ext[1]=="xlsx"| ext[1]=="xls"){
+        tbl=data.frame(readxl::read_excel(infile$datapath,sheet = input$planilha3))}
+      else{tbl=read.csv(infile$datapath, header = TRUE, sep = input$deccsv3)}
+    })
+    z()})
+  output$analysisdose <- renderPrint({
+    z <- reactive({
+      infile3 <- input$uploadedcsv3
+      if (is.null(infile3)){return(cat("Adicione seu conjunto de dados"))}
+      ext=tools::file_ext(infile3)
+      if(ext[1]=="xlsx"| ext[1]=="xls"){
+        tbl=data.frame(readxl::read_excel(infile3$datapath,sheet = input$planilha3))}
+      else{tbl=read.csv(infile3$datapath, header = TRUE, sep = input$deccsv3)}
+    })
+    observe({
+      vchoices <- names(z())
+      updateSelectInput(session, "tratAg3", choices = vchoices,selected = names(z())[1])
+      updateSelectInput(session, "respAg3", choices = vchoices,selected = names(z())[2])})
+  })
+  dose <- eventReactive(input$godose,{
+    infile1 <- input$uploadedcsv3
+    if (is.null(infile1)){return(cat("Selecione a coluna de tratamento e resposta"))}
+    ext=tools::file_ext(infile1)
+    if(ext[1]=="xlsx"| ext[1]=="xls"){
+      tbl1=data.frame(readxl::read_excel(infile1$datapath,sheet = input$planilha3))}
+    else{tbl1=read.csv(infile1$datapath, header = TRUE, sep = input$deccsv3)}
+    trat=tbl1[,input$tratAg3]
+    resp=tbl1[,input$respAg3]
+    cate=tbl1[,input$catAg3]
+    xlab=parse(text=input$xlab3)
+    ylab=parse(text=input$ylab3)
+    width=input$width3
+    height=input$height3
+    point=input$point3
+    linesize=input$linesize3
+    pointshape=input$pointshape3
+    pointsize=input$pointsize3
+    fontfamily=input$fontfamily3
+    textsize=input$textsize3
+    labelsize=input$labelsize3
+    adicionar=if(input$adddose3=="Sim"){TRUE}else{FALSE}
+    adicionar1=if(input$addIC=="Sim"){TRUE}else{FALSE}
+    esclog=if(input$EDlog=="Sim"){TRUE}else{FALSE}
+    if(input$model3=="L.4"){graph=doseresposta(trat,resp+input$constantED,ylab = ylab,xlab=xlab,sample = input$EDsim,force.ED = input$ED4,round = input$EDdec,log=esclog,
+                                               pointshape = pointshape,pointsize = pointsize,add.ic = adicionar1,
+                                               linesize = linesize,textsize = textsize,titlesize = textsize,point = input$pointDR,
+                                               fontfamily = fontfamily,add.ED = adicionar,ED = input$calcED,
+                                               theme = themes[[input$thema3]])}
+    if(input$model3=="L.3"){graph=doseresposta(trat,resp+input$constantED,model = L.3(),ylab = ylab,xlab=xlab,sample = input$EDsim,force.ED = input$ED4,round = input$EDdec,
+                                               pointshape = pointshape,pointsize = pointsize,add.ic = adicionar1,log=esclog,
+                                               linesize = linesize,textsize = textsize,add.ED = adicionar,point = input$pointDR,
+                                               titlesize = textsize,fontfamily = fontfamily,ED = input$calcED,
+                                               theme = themes[[input$thema3]])}
+  graph
+    })
+  output$ED=renderInfoBox({infoBox(title = "Dose resposta",
+    round(dose()[[1]]$plot$b[1],3),fill = TRUE,icon = icon("tint"),
+    color = "blue")})
+  output$ED1=renderInfoBox({infoBox(title = "Resposta",
+                                    round(predict(dose()[[1]]$plot$mod,
+                                            newdata = data.frame(x=round(dose()[[1]]$plot$b[1],3))),3),
+                                   fill = TRUE,icon = icon("seedling"),
+                                   color = "green")})
+  output$ED5=renderInfoBox({infoBox(title = "Dose estimada",
+                                    round(dose()[[3]],3),
+                                    fill = TRUE,
+                                    icon = icon("tint"),
+                                    color = "green")})
+  output$regreprint3=shiny::renderDataTable(dose()[[2]])
+  output$regredose=renderPlot(dose()[[1]],width = function()input$width3,height = function()input$height3)
+}
+shinyApp(ui, server)
